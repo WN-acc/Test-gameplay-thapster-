@@ -439,7 +439,13 @@
     }
 
     let audioAnchor = null;   // { c: AudioContext time, t: chart time, r: playback rate } — clock = t + (now - c) * r
-    function outLatency() { const c = audioCtx; if (!c) return 0; const v = (c.outputLatency || 0) + (c.baseLatency || 0); return (isFinite(v) && v > 0 && v < 1) ? v : 0; }
+    let _olAt = -1e9, _olVal = 0;
+    function outLatency() {   // cached: reading outputLatency/baseLatency is slow on Safari and this runs thousands of times per frame
+      const c = audioCtx; if (!c) return 0;
+      const pn = performance.now(); if (pn - _olAt < 500) return _olVal;
+      const v = (c.outputLatency || 0) + (c.baseLatency || 0);
+      _olVal = (isFinite(v) && v > 0 && v < 1) ? v : 0; _olAt = pn; return _olVal;
+    }
     function setPitch(v) {
       v = clamp(v, 0.5, 1.5);
       if (audioSource && audioAnchor && audioCtx) {             // re-anchor so the song clock does not jump when the rate changes mid-song
@@ -1539,7 +1545,9 @@ function buttonDividerX(ln, yf) { return buttonBoundaryX(ln, yf); }
       if (audioBuffer && state.audioStartSet) t = Math.min(t, state.audioStart);
       return Math.max(-5, t);
     }
-    function visualSongTime() {
+    let _vtCache = null;
+    function visualSongTime() { return _vtCache !== null ? _vtCache : visualSongTimeRaw(); }   // inside draw(): computed once per frame
+    function visualSongTimeRaw() {
       // sync กับ audio ถ้ามี (แม่นกว่า game clock)
       const at = audioSyncTime();
       if (state.resumeCountdown > 0) {                         // resume: time frozen during 3-2-1, then the notes slide back up the track (ease-out), Enjoy-measured
@@ -2190,7 +2198,8 @@ function buttonDividerX(ln, yf) { return buttonBoundaryX(ln, yf); }
       state.last = now;
       if (!state.pauseMenuOpen && !state.exitRequested) GC += Math.min(0.25, raw);   // game clock for intro / outro / sweeps (real time while playing, frozen in the pause menu)
       update(dt);
-      draw();
+      _vtCache = visualSongTimeRaw();
+      try { draw(); } finally { _vtCache = null; }
       rafId = requestAnimationFrame(frame);
     }
     function goBackground() { if (state.songPlaying) openPauseMenu(); stopAudio(); }   // floating: leaving the app pauses and never lets the song run unseen
